@@ -1,0 +1,94 @@
+name: CI-Laravel
+#CHECK PREVIOUS PUSH TO GET THE CONFIG VARIABLES FOR MYSQL
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  laravel-tests:
+
+    runs-on: ubuntu-latest # Like Docker.
+    env:
+      APP_URL: "http://127.0.0.1:8000"
+      DB_USERNAME: user
+      DB_PASSWORD: secret
+      MAIL_MAILER: log
+      ACTIONS_STEP_DEBUG: true
+
+    services:
+      mysql:
+        image: mysql:8.0.34-oracle #Using the same as I'm using in Docker.
+        env: #Setting the var for MySQL.
+          MYSQL_DATABASE: laravel
+          MYSQL_USER: user
+          MYSQL_PASSWORD: secret
+          MYSQL_ROOT_PASSWORD: secret
+        ports: #I can use the same port, but can be changed.
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+
+    steps: #The shivammathur can be changed too.
+      # uses: shivammathur/setup-php@15c43e89cdef867065b0213be354c2841860869e
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: :php_psr #Fix Fatal error: Declaration of Monolog\Logger::emergency
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: check mysql version #Used only to test the file
+        run: mysql -V
+      - name: Verify MySQL connection #Used only to test the file
+        run: |
+          mysql --host 127.0.0.1 --port 3306 -uuser -psecret -e "SHOW DATABASES"
+      - name: Copy .env
+        run: php -r "file_exists('.env') || copy('.env.example', '.env');"
+      - name: Install Dependencies
+        run: composer install --no-progress --prefer-dist --optimize-autoloader
+      - name: Generate key
+        run: php artisan key:generate
+      - name: Directory Permissions
+        run: chmod -R 777 storage bootstrap/cache
+      - name: Install Node.js npm dependencies #Important part as will NOT run breeze and pages,
+        #The npm run build is needed as npm run dev will freeze the command line
+        #The only thing needed is to build the assets
+        run: |
+          npm install
+          npm run build
+      - name: Check files
+        run: ls -a
+      - name: check php version
+        run: |
+          php artisan --version
+          php --version
+      - name: Run Migrations
+        # The php artisan migrate:fresh --seed can be run before, but keep here as it works too.
+        run: php artisan migrate:fresh --seed      
+      - name: Execute tests (Unit and Feature tests) via PHPUnit
+        run: vendor/bin/phpunit --coverage-clover=coverage.xml
+     
+      - name: Run Static Analysis
+        run: vendor/bin/phpstan  analyze  --memory-limit=2G --no-progress
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONARCLOUD_TOKEN }}
+      #Start automated tests
+      - name: Upgrade Chrome Driver
+        run: php artisan dusk:chrome-driver --detect
+      - name: Start Chrome Driver
+        run: ./vendor/laravel/dusk/bin/chromedriver-linux &
+      - name: Run Laravel Server
+        run: php artisan serve --no-reload &
+      - name: Run Dusk Tests
+        run: php artisan dusk
+      - name: Upload Screenshots
+        if: failure()
+        uses: actions/upload-artifact@v2
+        with:
+          name: screenshots
+          path: tests/Browser/screenshots   
