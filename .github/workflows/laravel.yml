@@ -36,7 +36,7 @@ jobs:
         with:
           php-version: '8.2'
           extensions: :php_psr #Fix Fatal error: Declaration of Monolog\Logger::emergency
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: check mysql version #Used only to test the file
